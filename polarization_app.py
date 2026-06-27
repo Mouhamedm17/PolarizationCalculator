@@ -398,17 +398,19 @@ with st.sidebar:
             is_pol = e["kind"].startswith("Linear")
             icon = "🟦 Polarizer" if is_pol else "🟩 Waveplate"
             with st.expander(f"{i+1}. {icon}", expanded=True):
-                # editable axis angle (live)
+                # editable axis angle (live, precise entry)
                 e["angle"] = np.radians(
-                    st.slider("Axis angle (°)", -90, 90,
-                              int(round(np.degrees(e["angle"]))), 1,
-                              key=f"ang{i}"))
+                    st.number_input("Axis angle (°)", min_value=-90.0,
+                                    max_value=90.0,
+                                    value=float(round(np.degrees(e["angle"]), 2)),
+                                    step=1.0, format="%.2f", key=f"ang{i}"))
 
                 # editable retardance for waveplates
                 if not is_pol:
                     cur = np.degrees(e["retard"])
-                    preset = ("Quarter-wave (λ/4)" if abs(cur - 90) < 1 else
-                              "Half-wave (λ/2)" if abs(cur - 180) < 1 else "Custom")
+                    preset = ("Quarter-wave (λ/4)" if abs(cur - 90) < 0.01 else
+                              "Half-wave (λ/2)" if abs(cur - 180) < 0.01 else
+                              "Custom")
                     choice = st.selectbox(
                         "Retardance",
                         ["Quarter-wave (λ/4)", "Half-wave (λ/2)", "Custom"],
@@ -421,8 +423,11 @@ with st.sidebar:
                         e["retard"] = np.pi
                     else:
                         e["retard"] = np.radians(
-                            st.slider("Retardance (°)", 0, 360,
-                                      int(round(cur)), 5, key=f"ret{i}"))
+                            st.number_input("Retardance (°)", min_value=0.0,
+                                            max_value=360.0,
+                                            value=float(round(cur, 2)),
+                                            step=1.0, format="%.2f",
+                                            key=f"ret{i}"))
 
                 # reorder / remove controls
                 b1, b2, b3 = st.columns(3)
