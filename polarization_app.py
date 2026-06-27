@@ -27,8 +27,9 @@ Put these two files next to this script in your repo:
       matplotlib
 
   packages.txt          <-- system (apt) packages, installed by Streamlit Cloud
-      libgl1-mesa-glx
-      libgl1-mesa-dri
+      libgl1               (provides libGL.so.1; replaces obsolete libgl1-mesa-glx)
+      libglx-mesa0         (Mesa GLX loader)
+      libgl1-mesa-dri      (llvmpipe software renderer)
       xvfb
 
 Software OpenGL is forced below (LIBGL_ALWAYS_SOFTWARE etc.) BEFORE pyvista is
@@ -393,6 +394,6 @@ if I > 1e-6:
     except Exception as ex:
         st.error(f"3D render failed (OpenGL/xvfb issue): {ex}")
         st.info("Streamlit Cloud: add packages.txt with "
-                "libgl1-mesa-glx, libgl1-mesa-dri, xvfb (see header).")
+                "libgl1, libglx-mesa0, libgl1-mesa-dri, xvfb (see header).")
 else:
     st.warning("Beam fully extinguished — no polarization to display.")
