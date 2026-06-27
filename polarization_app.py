@@ -17,33 +17,43 @@ RUNNING LOCALLY
 -----------------------------------------------------------------------
 RUNNING ON STREAMLIT CLOUD  (headless, no GPU, no X server)
 -----------------------------------------------------------------------
-The default `vtk` wheel from PyPI renders through X11/EGL, which does not
-exist on Streamlit Cloud and segfaults. The fix is the OSMesa-built VTK wheel
-(`vtk-osmesa`), which renders fully offscreen on CPU. Put these next to the
-script in your repo:
+Two gotchas, both handled by the files below:
+
+  1. The default `vtk` wheel renders through X11/EGL, which Streamlit Cloud
+     lacks. VTK >= 9.4 bundles OSMesa in the SAME wheel and selects it at
+     runtime via the VTK_DEFAULT_OPENGL_WINDOW env var (set at the top of this
+     file). So you just need the normal `vtk>=9.4` — NOT a separate vtk-osmesa
+     wheel (that one is obsolete and isn't even on PyPI).
+
+  2. VTK ships wheels only up to Python 3.13. Streamlit Cloud otherwise grabs
+     3.14 and the install fails with "No matching distribution". Pin 3.13.
+
+Put these three files next to this script in your repo:
+
+  runtime.txt
+      3.13
 
   requirements.txt
       streamlit
       numpy
       matplotlib
-      pyvista
+      pyvista>=0.44
       stpyvista
-      vtk-osmesa          <-- replaces the default vtk wheel (do NOT also list vtk)
+      vtk>=9.4
 
-  packages.txt          <-- system (apt) packages
+  packages.txt          <-- OSMesa runtime libraries
       libgl1
       libglx-mesa0
-      libosmesa6          <-- the OSMesa runtime the wheel links against
-
-No xvfb, no DISPLAY, no X server. The env vars at the top of this file select
-the OSMesa render window before VTK imports.
+      libosmesa6
 -----------------------------------------------------------------------
 """
 
 # --- headless offscreen rendering config: must run before pyvista / VTK import
-# Uses the vtk-osmesa wheel (see requirements.txt) so VTK renders through OSMesa
-# with no X server / display needed. Do NOT use xvfb here — on Streamlit Cloud
-# the X path is unavailable and segfaults; OSMesa is the supported route.
+# VTK >= 9.4 ships OSMesa + EGL inside the normal `vtk` wheel and picks the
+# render window at runtime. Setting VTK_DEFAULT_OPENGL_WINDOW below makes VTK
+# render through OSMesa (pure CPU, no display, no X server, no xvfb), which is
+# what works on Streamlit Cloud. Requires Python <= 3.13 (no vtk wheel for 3.14
+# yet) — pin it with runtime.txt. See header for deployment files.
 import os
 os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
 os.environ.setdefault("VTK_DEFAULT_OPENGL_WINDOW", "vtkOSOpenGLRenderWindow")
@@ -188,7 +198,7 @@ def draw_train(start_label, elements, intensities):
 def _new_plotter(size):
     import pyvista as pv
     pv.OFF_SCREEN = True
-    # OSMesa (vtk-osmesa wheel) renders with no display; no xvfb needed.
+    # OSMesa offscreen render (vtk>=9.4, selected via env var); no display, no xvfb.
     return pv.Plotter(window_size=list(size), off_screen=True)
 
 
@@ -439,8 +449,8 @@ if I > 1e-6:
         st.error("PyVista not installed. Run: pip install pyvista stpyvista")
     except Exception as ex:
         st.error(f"3D render failed (OpenGL/xvfb issue): {ex}")
-        st.info("On Streamlit Cloud, use the OSMesa VTK build: put `vtk-osmesa` "
-                "in requirements.txt and `libgl1, libglx-mesa0, libosmesa6` in "
+        st.info("On Streamlit Cloud: pin Python 3.13 (runtime.txt), use vtk>=9.4 "
+                "in requirements.txt, and libgl1, libglx-mesa0, libosmesa6 in "
                 "packages.txt (see header).")
 else:
     st.warning("Beam fully extinguished — no polarization to display.")

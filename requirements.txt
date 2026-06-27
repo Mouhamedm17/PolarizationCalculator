@@ -1,6 +1,6 @@
 streamlit
 numpy
 matplotlib
-pyvista
+pyvista>=0.44
 stpyvista
-vtk-osmesa
+vtk>=9.4
