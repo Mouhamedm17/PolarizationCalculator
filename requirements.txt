@@ -1,5 +1,6 @@
 streamlit
-pyvista
-stpyvista
 numpy
 matplotlib
+pyvista
+stpyvista
+vtk-osmesa

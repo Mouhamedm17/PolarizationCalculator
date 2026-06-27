@@ -15,35 +15,40 @@ RUNNING LOCALLY
     streamlit run polarization_app.py
 
 -----------------------------------------------------------------------
-RUNNING ON STREAMLIT CLOUD  (headless, no GPU)
+RUNNING ON STREAMLIT CLOUD  (headless, no GPU, no X server)
 -----------------------------------------------------------------------
-Put these two files next to this script in your repo:
+The default `vtk` wheel from PyPI renders through X11/EGL, which does not
+exist on Streamlit Cloud and segfaults. The fix is the OSMesa-built VTK wheel
+(`vtk-osmesa`), which renders fully offscreen on CPU. Put these next to the
+script in your repo:
 
   requirements.txt
       streamlit
-      pyvista
-      stpyvista
       numpy
       matplotlib
+      pyvista
+      stpyvista
+      vtk-osmesa          <-- replaces the default vtk wheel (do NOT also list vtk)
 
-  packages.txt          <-- system (apt) packages, installed by Streamlit Cloud
-      libgl1               (provides libGL.so.1; replaces obsolete libgl1-mesa-glx)
-      libglx-mesa0         (Mesa GLX loader)
-      libgl1-mesa-dri      (llvmpipe software renderer)
-      xvfb
+  packages.txt          <-- system (apt) packages
+      libgl1
+      libglx-mesa0
+      libosmesa6          <-- the OSMesa runtime the wheel links against
 
-Software OpenGL is forced below (LIBGL_ALWAYS_SOFTWARE etc.) BEFORE pyvista is
-imported, and the 3D views use the stpyvista component, which is the supported
-path on Streamlit Cloud.
+No xvfb, no DISPLAY, no X server. The env vars at the top of this file select
+the OSMesa render window before VTK imports.
 -----------------------------------------------------------------------
 """
 
-# --- force software GL: must run before pyvista / VTK import --------------
+# --- headless offscreen rendering config: must run before pyvista / VTK import
+# Uses the vtk-osmesa wheel (see requirements.txt) so VTK renders through OSMesa
+# with no X server / display needed. Do NOT use xvfb here — on Streamlit Cloud
+# the X path is unavailable and segfaults; OSMesa is the supported route.
 import os
+os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
+os.environ.setdefault("VTK_DEFAULT_OPENGL_WINDOW", "vtkOSOpenGLRenderWindow")
 os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
 os.environ.setdefault("GALLIUM_DRIVER", "llvmpipe")
-os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
-os.environ.setdefault("DISPLAY", ":99")
 
 import numpy as np
 import streamlit as st
@@ -183,10 +188,7 @@ def draw_train(start_label, elements, intensities):
 def _new_plotter(size):
     import pyvista as pv
     pv.OFF_SCREEN = True
-    try:
-        pv.start_xvfb()
-    except Exception:
-        pass
+    # OSMesa (vtk-osmesa wheel) renders with no display; no xvfb needed.
     return pv.Plotter(window_size=list(size), off_screen=True)
 
 
@@ -437,7 +439,8 @@ if I > 1e-6:
         st.error("PyVista not installed. Run: pip install pyvista stpyvista")
     except Exception as ex:
         st.error(f"3D render failed (OpenGL/xvfb issue): {ex}")
-        st.info("Streamlit Cloud: add packages.txt with "
-                "libgl1, libglx-mesa0, libgl1-mesa-dri, xvfb (see header).")
+        st.info("On Streamlit Cloud, use the OSMesa VTK build: put `vtk-osmesa` "
+                "in requirements.txt and `libgl1, libglx-mesa0, libosmesa6` in "
+                "packages.txt (see header).")
 else:
     st.warning("Beam fully extinguished — no polarization to display.")
