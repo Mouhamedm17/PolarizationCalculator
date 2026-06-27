@@ -73,6 +73,34 @@ except Exception:
     HAVE_STPYVISTA = False
 
 
+# --- full-width helpers -------------------------------------------------
+# Streamlit deprecated `use_container_width` (removal started in 2026 for some
+# elements). The replacement is width="stretch". These wrappers try the new
+# API and fall back to the old kwarg, so the app works on any Streamlit version.
+def _full_width(fn, *args, **kwargs):
+    try:
+        return fn(*args, width="stretch", **kwargs)
+    except TypeError:
+        return fn(*args, use_container_width=True, **kwargs)
+
+
+def img_full(image, **kwargs):
+    return _full_width(st.image, image, **kwargs)
+
+
+def pyplot_full(fig, **kwargs):
+    return _full_width(st.pyplot, fig, **kwargs)
+
+
+def button_full(label, **kwargs):
+    # st.button returns a bool; container is the caller (e.g. a column)
+    container = kwargs.pop("container", st)
+    try:
+        return container.button(label, width="stretch", **kwargs)
+    except TypeError:
+        return container.button(label, use_container_width=True, **kwargs)
+
+
 # ----------------------------------------------------------------------
 # Jones calculus
 # ----------------------------------------------------------------------
@@ -154,10 +182,14 @@ def draw_train(start_label, elements, intensities):
     box_w, box_h, gap = 1.5, 1.0, 0.45
 
     def beam(x0, x1, I):
+        # Clamp: unitary elements (waveplates) can yield I = 1.0000000002 from
+        # floating-point rounding, which would push alpha just past 1.0 and make
+        # matplotlib raise. Clamp to [0, 1] before deriving width/alpha.
+        Ic = min(1.0, max(0.0, float(I)))
         ax.add_patch(FancyArrow(x0, y, x1 - x0 - 0.05, 0,
-                                width=0.015 + 0.05 * I, head_width=0.18,
+                                width=0.015 + 0.05 * Ic, head_width=0.18,
                                 head_length=0.12, length_includes_head=True,
-                                color="#C0392B", alpha=0.55 + 0.45 * I))
+                                color="#C0392B", alpha=0.55 + 0.45 * Ic))
 
     ax.text(x, y + 0.78, "input", ha="center", fontsize=10, color="#555")
     ax.add_patch(FancyBboxPatch((x - 0.35, y - 0.45), 0.7, 0.9,
@@ -233,10 +265,14 @@ def field_plotter(j, n_periods=3, k=2 * np.pi):
     ell = np.column_stack([np.full_like(pex, n_periods), pex, pey])
     pl.add_mesh(pv.Spline(ell, len(wt)).tube(radius=0.016), color="#C0392B")
 
+    # Frame the scene so nothing clips: aim at the tube's center, then let
+    # PyVista fit all actors in view (reset_camera) and zoom out slightly.
     pl.camera_position = [(n_periods * 1.6, 2.6, 2.2),
                           (n_periods / 2, 0, 0), (0, 0, 1)]
     pl.add_axes(xlabel="z/lambda", ylabel="Ex", zlabel="Ey",
                 color="black", line_width=3)
+    pl.reset_camera()       # fit all actors in the viewport
+    pl.camera.zoom(0.85)    # pull back a touch so edges aren't tight against the frame
     return pl
 
 
@@ -280,12 +316,18 @@ def poincare_plotter(j):
                         font_size=18, text_color="#34495E",
                         shape=None, always_visible=True, show_points=False)
 
-    pl.add_mesh(pv.Line((0, 0, 0), tuple(bloch)), color="#C0392B", line_width=5)
+    # State vector + marker. Guard the degenerate case where bloch ~ origin
+    # (would make pv.Line throw on a zero-length segment).
+    if np.linalg.norm(bloch) > 1e-6:
+        pl.add_mesh(pv.Line((0, 0, 0), tuple(bloch)), color="#C0392B",
+                    line_width=5)
     pl.add_mesh(pv.Sphere(radius=0.05, center=tuple(bloch)), color="#C0392B")
 
     pl.camera_position = [(2.4, 1.8, 1.6), (0, 0, 0), (0, 0, 1)]
     pl.add_axes(xlabel="S1", ylabel="S2", zlabel="S3",
                 color="black", line_width=3)
+    pl.reset_camera()       # fit sphere + labels so poles aren't clipped
+    pl.camera.zoom(0.8)
     return pl
 
 
@@ -312,7 +354,7 @@ def show_plotter(pl, key, caption=None, interactive=False):
 
     img = pl.screenshot(return_img=True)
     pl.close()
-    st.image(img, use_container_width=True, caption=caption)
+    img_full(img, caption=caption)
 
 
 # ----------------------------------------------------------------------
@@ -335,7 +377,7 @@ with st.sidebar:
     st.header("Add an element")
     add_kind = st.radio("Type", ["Linear polarizer", "Waveplate"])
     c1, c2 = st.columns(2)
-    if c1.button("➕ Add", use_container_width=True):
+    if button_full("➕ Add", container=c1):
         new = {"kind": add_kind, "angle": 0.0}
         if add_kind == "Waveplate":
             new["retard"] = np.pi / 2  # default λ/4
@@ -343,7 +385,7 @@ with st.sidebar:
             new["retard"] = None
         st.session_state.elements.append(new)
         st.rerun()
-    if c2.button("🗑 Clear all", use_container_width=True):
+    if button_full("🗑 Clear all", container=c2):
         st.session_state.elements = []
         st.rerun()
 
@@ -384,17 +426,17 @@ with st.sidebar:
 
                 # reorder / remove controls
                 b1, b2, b3 = st.columns(3)
-                if b1.button("▲", key=f"up{i}", use_container_width=True,
-                             disabled=(i == 0)):
+                if button_full("▲", container=b1, key=f"up{i}",
+                               disabled=(i == 0)):
                     st.session_state.elements[i-1], st.session_state.elements[i] = \
                         st.session_state.elements[i], st.session_state.elements[i-1]
                     st.rerun()
-                if b2.button("▼", key=f"dn{i}", use_container_width=True,
-                             disabled=(i == len(st.session_state.elements)-1)):
+                if button_full("▼", container=b2, key=f"dn{i}",
+                               disabled=(i == len(st.session_state.elements)-1)):
                     st.session_state.elements[i+1], st.session_state.elements[i] = \
                         st.session_state.elements[i], st.session_state.elements[i+1]
                     st.rerun()
-                if b3.button("✕", key=f"rm{i}", use_container_width=True):
+                if button_full("✕", container=b3, key=f"rm{i}"):
                     st.session_state.elements.pop(i)
                     st.rerun()
 
@@ -418,7 +460,7 @@ I = intensities[-1]
 
 # ---- Result 1: schematic ----
 st.subheader("1 · Optical train")
-st.pyplot(draw_train(start_key, elements, intensities), use_container_width=True)
+pyplot_full(draw_train(start_key, elements, intensities))
 
 # ---- summary row ----
 m1, m2, m3 = st.columns(3)
@@ -435,22 +477,27 @@ else:
 st.subheader("2 · Final polarization — real-space field & Poincaré sphere")
 colL, colR = st.columns(2)
 
-if I > 1e-6:
+
+def safe_render(make_plotter, jvec, key, caption, label):
+    """Build + show one 3D view, catching any error so the page never crashes."""
+    st.markdown(label)
     try:
-        with colL:
-            st.markdown("**E-field helix**")
-            show_plotter(field_plotter(j_final), key="field",
-                         caption="Blue tube: E along z. Red ring: temporal ellipse.")
-        with colR:
-            st.markdown("**Poincaré sphere**")
-            show_plotter(poincare_plotter(j_final), key="poincare",
-                         caption="Red vector: final state. Poles = H/V/D/A/R/L.")
+        show_plotter(make_plotter(jvec), key=key, caption=caption)
     except ImportError:
-        st.error("PyVista not installed. Run: pip install pyvista stpyvista")
+        st.error("PyVista/VTK not installed. See requirements.txt in the header.")
     except Exception as ex:
-        st.error(f"3D render failed (OpenGL/xvfb issue): {ex}")
-        st.info("On Streamlit Cloud: pin Python 3.13 (runtime.txt), use vtk>=9.4 "
-                "in requirements.txt, and libgl1, libglx-mesa0, libosmesa6 in "
-                "packages.txt (see header).")
+        st.error(f"This view couldn't render: {type(ex).__name__}: {ex}")
+        st.caption("The other panel and the rest of the app are unaffected.")
+
+
+if I > 1e-6:
+    with colL:
+        safe_render(field_plotter, j_final, "field",
+                    "Blue tube: E along z. Red ring: temporal ellipse.",
+                    "**E-field helix**")
+    with colR:
+        safe_render(poincare_plotter, j_final, "poincare",
+                    "Red vector: final state. Poles = H/V/D/A/R/L.",
+                    "**Poincaré sphere**")
 else:
     st.warning("Beam fully extinguished — no polarization to display.")
