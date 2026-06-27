@@ -277,19 +277,30 @@ def poincare_plotter(j):
     return pl
 
 
-def show_plotter(pl, key, caption=None):
-    """Render a plotter via stpyvista if available, else a screenshot."""
+def show_plotter(pl, key, caption=None, interactive=False):
+    """Render a plotter.
+
+    Default is a server-side screenshot (a PNG), which is the robust path on
+    Streamlit Cloud. The stpyvista *interactive* (trame) backend serializes the
+    scene to HTML and can fail with a pickling error on some plotter contents,
+    so it is opt-in via `interactive=True`.
+    """
     if pl is None:
         st.info("Nothing to render.")
         return
-    if HAVE_STPYVISTA:
-        stpyvista(pl, key=key)
-        if caption:
-            st.caption(caption)
-    else:
-        img = pl.screenshot(return_img=True)
-        pl.close()
-        st.image(img, use_container_width=True, caption=caption)
+
+    if interactive and HAVE_STPYVISTA:
+        try:
+            stpyvista(pl, key=key)
+            if caption:
+                st.caption(caption)
+            return
+        except Exception:
+            pass  # fall through to a static screenshot
+
+    img = pl.screenshot(return_img=True)
+    pl.close()
+    st.image(img, use_container_width=True, caption=caption)
 
 
 # ----------------------------------------------------------------------
@@ -310,37 +321,70 @@ with st.sidebar:
 
     st.divider()
     st.header("Add an element")
-    kind = st.radio("Type", ["Linear polarizer", "Waveplate"])
-    angle_deg = st.slider("Axis angle (degrees)", -90, 90, 0, 1)
-
-    retard = None
-    if kind == "Waveplate":
-        wp = st.selectbox("Retardance",
-                          ["Quarter-wave (λ/4)", "Half-wave (λ/2)", "Custom"])
-        if wp.startswith("Quarter"):
-            retard = np.pi / 2
-        elif wp.startswith("Half"):
-            retard = np.pi
-        else:
-            retard = np.radians(st.slider("Retardance (degrees)", 0, 360, 90, 5))
-
+    add_kind = st.radio("Type", ["Linear polarizer", "Waveplate"])
     c1, c2 = st.columns(2)
     if c1.button("➕ Add", use_container_width=True):
-        st.session_state.elements.append(
-            {"kind": kind, "angle": np.radians(angle_deg), "retard": retard})
+        new = {"kind": add_kind, "angle": 0.0}
+        if add_kind == "Waveplate":
+            new["retard"] = np.pi / 2  # default λ/4
+        else:
+            new["retard"] = None
+        st.session_state.elements.append(new)
+        st.rerun()
     if c2.button("🗑 Clear all", use_container_width=True):
         st.session_state.elements = []
+        st.rerun()
 
     if st.session_state.elements:
         st.divider()
-        st.subheader("Remove an element")
+        st.header("Edit train")
+        st.caption("Light passes top → bottom. Changes apply live.")
+
         for i, e in enumerate(st.session_state.elements):
-            lbl = (f"Pol @ {np.degrees(e['angle']):.0f}°"
-                   if e["kind"].startswith("Linear")
-                   else f"WP δ={np.degrees(e['retard']):.0f}° @ {np.degrees(e['angle']):.0f}°")
-            if st.button(f"✕ {i+1}. {lbl}", key=f"rm{i}"):
-                st.session_state.elements.pop(i)
-                st.rerun()
+            is_pol = e["kind"].startswith("Linear")
+            icon = "🟦 Polarizer" if is_pol else "🟩 Waveplate"
+            with st.expander(f"{i+1}. {icon}", expanded=True):
+                # editable axis angle (live)
+                e["angle"] = np.radians(
+                    st.slider("Axis angle (°)", -90, 90,
+                              int(round(np.degrees(e["angle"]))), 1,
+                              key=f"ang{i}"))
+
+                # editable retardance for waveplates
+                if not is_pol:
+                    cur = np.degrees(e["retard"])
+                    preset = ("Quarter-wave (λ/4)" if abs(cur - 90) < 1 else
+                              "Half-wave (λ/2)" if abs(cur - 180) < 1 else "Custom")
+                    choice = st.selectbox(
+                        "Retardance",
+                        ["Quarter-wave (λ/4)", "Half-wave (λ/2)", "Custom"],
+                        index=["Quarter-wave (λ/4)", "Half-wave (λ/2)",
+                               "Custom"].index(preset),
+                        key=f"wp{i}")
+                    if choice.startswith("Quarter"):
+                        e["retard"] = np.pi / 2
+                    elif choice.startswith("Half"):
+                        e["retard"] = np.pi
+                    else:
+                        e["retard"] = np.radians(
+                            st.slider("Retardance (°)", 0, 360,
+                                      int(round(cur)), 5, key=f"ret{i}"))
+
+                # reorder / remove controls
+                b1, b2, b3 = st.columns(3)
+                if b1.button("▲", key=f"up{i}", use_container_width=True,
+                             disabled=(i == 0)):
+                    st.session_state.elements[i-1], st.session_state.elements[i] = \
+                        st.session_state.elements[i], st.session_state.elements[i-1]
+                    st.rerun()
+                if b2.button("▼", key=f"dn{i}", use_container_width=True,
+                             disabled=(i == len(st.session_state.elements)-1)):
+                    st.session_state.elements[i+1], st.session_state.elements[i] = \
+                        st.session_state.elements[i], st.session_state.elements[i+1]
+                    st.rerun()
+                if b3.button("✕", key=f"rm{i}", use_container_width=True):
+                    st.session_state.elements.pop(i)
+                    st.rerun()
 
 # Build element matrices + labels
 elements = []
